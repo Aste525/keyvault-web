@@ -214,19 +214,56 @@ async function signFile(file, algo, hashAlgo = 'sha256') {
 }
 
 // ---------- API ----------
+// Alamat server: kosong = server yang sama dengan halaman ini; atau link server lain (mis. trycloudflare)
+let base = (localStorage.getItem('kv.server') || '').replace(/\/+$/, '');
+let serverOk = false;
 const api = async (url, body) => {
-  const r = await fetch(url, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined);
-  return { ok: r.ok, data: await r.json().catch(() => ({})) };
+  try {
+    const r = await fetch(base + url, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined);
+    return { ok: r.ok, data: await r.json().catch(() => ({})) };
+  } catch {
+    return { ok: false, data: { error: 'Server tidak terjangkau' } };
+  }
 };
+async function refreshServer() {
+  const r = await api('/api/ledger?limit=1');
+  serverOk = r.ok && Array.isArray(r.data.blocks);
+  const st = $('#srvStat');
+  if (st) st.textContent = serverOk ? 'Terhubung ke ' + (base || location.origin) : 'Server belum aktif. Ledger dan mode ON mati; alamat, enkripsi, hashing, dan tanda tangan tetap berfungsi.';
+}
+function mountServerBox() {
+  if ($('#srvBox')) return;
+  const box = el('div', 'card bg-dark border-secondary mt-3'); box.id = 'srvBox';
+  const body = el('div', 'card-body'); box.appendChild(body);
+  body.appendChild(el('div', 'fw-semibold mb-1', 'Server (ledger dan mode ON)'));
+  const st = el('div', 'small-note mb-2'); st.id = 'srvStat'; body.appendChild(st);
+  const row = el('div', 'input-group');
+  const inp = el('input', 'form-control'); inp.id = 'srvUrl'; inp.placeholder = 'https://xxxx.trycloudflare.com'; inp.value = base;
+  const b = el('button', 'btn btn-outline-light', 'Hubungkan');
+  b.onclick = async () => {
+    const v = inp.value.trim().replace(/\/+$/, '');
+    if (v && !/^https?:\/\/\S+$/.test(v)) { st.textContent = 'Alamat server harus diawali https://'; return; }
+    base = v; localStorage.setItem('kv.server', base);
+    await refreshServer(); await loadModes(); loadLedger(); renderPanel(currentCat); renderDoh();
+  };
+  row.appendChild(inp); row.appendChild(b); body.appendChild(row);
+  body.appendChild(el('div', 'small-note mt-2', 'Server hanya menerima alamat anonim dan blok ledger. Jalankan server sendiri dengan npm start dari repo GitHub, lalu tempel link HTTPS-nya di sini.'));
+  $('#dohBox').before(box);
+}
 async function setMode(algo, on) {
+  if (!serverOk) { alert('Server belum aktif. Isi alamat server di kotak Server di bawah, atau jalankan npm start dari repo GitHub.'); renderPanel(currentCat); return; }
   const r = await api('/api/mode', { addr: vault.addr, algo, on });
   if (!r.ok) alert(r.data.error || 'Gagal mengubah mode');
   active = r.data.active || active;
   renderPanel(currentCat);
   renderDoh();
 }
-async function loadModes() { const r = await api('/api/mode?addr=' + vault.addr); active = r.data.active || []; renderDoh(); }
+async function loadModes() {
+  if (!serverOk) { active = []; renderDoh(); return; }
+  const r = await api('/api/mode?addr=' + vault.addr); active = r.data.active || []; renderDoh();
+}
 async function loadLedger() {
+  if (!serverOk) { $('#ledgerStat').textContent = 'Server belum aktif, riwayat blockchain tidak tersedia.'; $('#ledgerList').textContent = ''; return; }
   const r = await api('/api/ledger?limit=10');
   const d = r.data;
   $('#ledgerStat').textContent = `${d.total} blok, ${(d.bytes / 1048576).toFixed(2)} MB dari ${(d.max / 1048576).toFixed(0)} MB. Blok head: 0x01`;
@@ -245,7 +282,7 @@ function renderDoh() {
   const on = active.length > 0;
   $('#dohBox').classList.toggle('d-none', !on);
   if (!on) { clearInterval(rotTimer); rotTimer = null; return; }
-  $('#dohUrl').textContent = `${location.origin}/dns/${vault.addr}`;
+  $('#dohUrl').textContent = `${base || location.origin}/dns/${vault.addr}`;
   if (rotTimer) return;
   const sync = async () => { const r = await api('/api/rotation?addr=' + vault.addr); rot = { n: r.data.n, ms: Date.now() + r.data.nextMs }; };
   sync();
@@ -330,7 +367,7 @@ function renderPanel(k) {
       const [h1, h2] = [await hashFile(a.files[0], algo), await hashFile(b.files[0], algo)];
       if (h1 === h2) {
         const r = await api('/api/ledger', { file: b.files[0].name, algo, a: h1, b: h2 });
-        status(out, `ASLI (${algo}): ${h1}` + (r.ok ? ` | Tercatat di blok #${r.data.block.index}` : ' | ' + r.data.error));
+        status(out, `ASLI (${algo}): ${h1}` + (r.ok ? ` | Tercatat di blok #${r.data.block.index}` : ' | Ledger: ' + (r.data.error || 'server belum aktif')));
         loadLedger();
       } else status(out, `TIDAK SAMA (dipalsukan atau berbeda). Asli: ${h1.slice(0, 16)}... Dibandingkan: ${h2.slice(0, 16)}...`, false);
     });
@@ -382,7 +419,7 @@ document.querySelectorAll('[data-doc]').forEach((a) => a.addEventListener('click
 async function enter() {
   $('#hero').classList.add('d-none'); $('#main').classList.remove('d-none');
   $('#addr').textContent = vault.addr;
-  renderCats(); await loadModes(); loadLedger();
+  mountServerBox(); await refreshServer(); renderCats(); await loadModes(); loadLedger();
 }
 $('#btnAddr').onclick = async () => {
   const b = $('#btnAddr'); b.disabled = true; b.textContent = 'Membuat alamat...';

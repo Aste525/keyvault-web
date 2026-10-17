@@ -130,6 +130,11 @@ const server = http.createServer(async (req, res) => {
     // Tidak ada logging IP, tidak ada X-Forwarded-For yang diteruskan
     const u = new URL(req.url, 'http://x');
     const p = u.pathname;
+    // CORS: website di GitHub Pages (atau domain lain) boleh memakai server ini
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+    res.setHeader('access-control-allow-headers', 'content-type');
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
     // DoH: /dns/<alamat>
     const m = p.match(/^\/dns\/([a-z2-7]{26})$/);
