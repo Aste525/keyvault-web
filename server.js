@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ripemd320, toHex } from './public/ciphers.js';
 
-const PORT = 28836;
+const PORT = Number(process.env.PORT) || 28836;
 const HOST = '0.0.0.0';
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUB = path.join(DIR, 'public');

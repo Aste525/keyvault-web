@@ -214,8 +214,10 @@ async function signFile(file, algo, hashAlgo = 'sha256') {
 }
 
 // ---------- API ----------
-// Alamat server: kosong = server yang sama dengan halaman ini; atau link server lain (mis. trycloudflare)
-let base = (localStorage.getItem('kv.server') || '').replace(/\/+$/, '');
+// Alamat server: kosong = server yang sama dengan halaman ini; atau link server lain
+// Website di GitHub Pages otomatis memakai server Render ini; kotak Server bisa menggantinya
+const DEFAULT_SERVER = location.hostname.endsWith('github.io') ? 'https://keyvault-aste525.onrender.com' : '';
+let base = (localStorage.getItem('kv.server') || DEFAULT_SERVER).replace(/\/+$/, '');
 let serverOk = false;
 const api = async (url, body) => {
   try {
@@ -230,6 +232,16 @@ async function refreshServer() {
   serverOk = r.ok && Array.isArray(r.data.blocks);
   const st = $('#srvStat');
   if (st) st.textContent = serverOk ? 'Terhubung ke ' + (base || location.origin) : 'Server belum aktif. Ledger dan mode ON mati; alamat, enkripsi, hashing, dan tanda tangan tetap berfungsi.';
+}
+// Server gratis di Render tidur setelah 15 menit sepi dan butuh sekitar 1 menit untuk bangun
+async function wakeServer() {
+  const st = $('#srvStat');
+  for (let i = 0; i < 12 && !serverOk; i++) {
+    if (st) st.textContent = 'Membangunkan server, bisa sampai 1 menit...';
+    await new Promise((r) => setTimeout(r, 7000));
+    await refreshServer();
+  }
+  if (serverOk) { await loadModes(); loadLedger(); renderPanel(currentCat); renderDoh(); }
 }
 function mountServerBox() {
   if ($('#srvBox')) return;
@@ -420,6 +432,7 @@ async function enter() {
   $('#hero').classList.add('d-none'); $('#main').classList.remove('d-none');
   $('#addr').textContent = vault.addr;
   mountServerBox(); await refreshServer(); renderCats(); await loadModes(); loadLedger();
+  if (!serverOk && base) wakeServer();
 }
 $('#btnAddr').onclick = async () => {
   const b = $('#btnAddr'); b.disabled = true; b.textContent = 'Membuat alamat...';
