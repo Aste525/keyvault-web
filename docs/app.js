@@ -214,9 +214,8 @@ async function signFile(file, algo, hashAlgo = 'sha256') {
 }
 
 // ---------- API ----------
-// Alamat server: kosong = server yang sama dengan halaman ini; atau link server lain
-// Website di GitHub Pages otomatis memakai server Render ini; kotak Server bisa menggantinya
-const DEFAULT_SERVER = location.hostname.endsWith('github.io') ? 'https://keyvault-aste525.onrender.com' : '';
+// Alamat server: website di GitHub Pages otomatis memakai server Cloudflare Workers ini; kotak Server bisa menggantinya
+const DEFAULT_SERVER = location.hostname.endsWith('github.io') ? 'https://keyvault-web.aste53347.workers.dev' : '';
 let base = (localStorage.getItem('kv.server') || DEFAULT_SERVER).replace(/\/+$/, '');
 let serverOk = false;
 const api = async (url, body) => {
@@ -233,16 +232,6 @@ async function refreshServer() {
   const st = $('#srvStat');
   if (st) st.textContent = serverOk ? 'Terhubung ke ' + (base || location.origin) : 'Server belum aktif. Ledger dan mode ON mati; alamat, enkripsi, hashing, dan tanda tangan tetap berfungsi.';
 }
-// Server gratis di Render tidur setelah 15 menit sepi dan butuh sekitar 1 menit untuk bangun
-async function wakeServer() {
-  const st = $('#srvStat');
-  for (let i = 0; i < 12 && !serverOk; i++) {
-    if (st) st.textContent = 'Membangunkan server, bisa sampai 1 menit...';
-    await new Promise((r) => setTimeout(r, 7000));
-    await refreshServer();
-  }
-  if (serverOk) { await loadModes(); loadLedger(); renderPanel(currentCat); renderDoh(); }
-}
 function mountServerBox() {
   if ($('#srvBox')) return;
   const box = el('div', 'card bg-dark border-secondary mt-3'); box.id = 'srvBox';
@@ -250,16 +239,16 @@ function mountServerBox() {
   body.appendChild(el('div', 'fw-semibold mb-1', 'Server (ledger dan mode ON)'));
   const st = el('div', 'small-note mb-2'); st.id = 'srvStat'; body.appendChild(st);
   const row = el('div', 'input-group');
-  const inp = el('input', 'form-control'); inp.id = 'srvUrl'; inp.placeholder = 'https://xxxx.trycloudflare.com'; inp.value = base;
+  const inp = el('input', 'form-control'); inp.id = 'srvUrl'; inp.placeholder = 'https://xxxx.workers.dev'; inp.value = base;
   const b = el('button', 'btn btn-outline-light', 'Hubungkan');
   b.onclick = async () => {
     const v = inp.value.trim().replace(/\/+$/, '');
     if (v && !/^https?:\/\/\S+$/.test(v)) { st.textContent = 'Alamat server harus diawali https://'; return; }
-    base = v; localStorage.setItem('kv.server', base);
+    base = v || DEFAULT_SERVER; localStorage.setItem('kv.server', v); inp.value = base;
     await refreshServer(); await loadModes(); loadLedger(); renderPanel(currentCat); renderDoh();
   };
   row.appendChild(inp); row.appendChild(b); body.appendChild(row);
-  body.appendChild(el('div', 'small-note mt-2', 'Server hanya menerima alamat anonim dan blok ledger. Jalankan server sendiri dengan npm start dari repo GitHub, lalu tempel link HTTPS-nya di sini.'));
+  body.appendChild(el('div', 'small-note mt-2', 'Server hanya menerima alamat anonim dan blok ledger. Untuk memakai server sendiri (Cloudflare Workers atau npm start dari repo GitHub), tempel link HTTPS-nya di sini. Kosongkan kolom lalu tekan Hubungkan untuk kembali ke server bawaan.'));
   $('#dohBox').before(box);
 }
 async function setMode(algo, on) {
@@ -432,7 +421,6 @@ async function enter() {
   $('#hero').classList.add('d-none'); $('#main').classList.remove('d-none');
   $('#addr').textContent = vault.addr;
   mountServerBox(); await refreshServer(); renderCats(); await loadModes(); loadLedger();
-  if (!serverOk && base) wakeServer();
 }
 $('#btnAddr').onclick = async () => {
   const b = $('#btnAddr'); b.disabled = true; b.textContent = 'Membuat alamat...';
