@@ -5,7 +5,7 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   echo "cloudflared belum terpasang. Termux: pkg install cloudflared"
   exit 1
 fi
-node server.js &
+node secure-start.cjs &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null' EXIT INT TERM
 sleep 1

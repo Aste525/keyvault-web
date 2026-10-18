@@ -5,9 +5,10 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node secure-start.cjs",
     "public": "bash start-public.sh",
-    "test": "node selftest.mjs"
+    "test": "node selftest.mjs",
+    "start:legacy": "node server.js"
   },
   "engines": {
     "node": ">=18"
