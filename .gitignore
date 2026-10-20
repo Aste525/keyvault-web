@@ -1,4 +1,5 @@
 node_modules/
 ledger.json
 modes.json
+data.json
 .env

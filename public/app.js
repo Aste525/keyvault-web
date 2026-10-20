@@ -2,11 +2,13 @@ import { sha256 } from 'https://cdn.jsdelivr.net/npm/@noble/hashes@1.4.0/sha256/
 import { ed448, x448 } from 'https://cdn.jsdelivr.net/npm/@noble/curves@1.4.0/ed448/+esm';
 import { secp256k1, schnorr } from 'https://cdn.jsdelivr.net/npm/@noble/curves@1.4.0/secp256k1/+esm';
 import { RIPEMD320, makeCipher, GCM } from './ciphers.js';
+import { sealVault, openVault, deriveMaster, ITER } from './vaultcrypto.js';
 
 const $ = (s) => document.querySelector(s);
 const enc = new TextEncoder();
 const hex = (b) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 const unhex = (h) => Uint8Array.from(h.match(/../g) || [], (x) => parseInt(x, 16));
+const cat = (a, b) => { const o = new Uint8Array(a.length + b.length); o.set(a, 0); o.set(b, a.length); return o; };
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567';
 function b32(bytes) {
   let bits = 0, v = 0, o = '';
@@ -22,6 +24,7 @@ function b32(bytes) {
 const CATS = {
   enc: {
     title: 'Enkripsi', icon: '🔒', blurb: 'Mengunci data supaya hanya kamu yang bisa membukanya.',
+    effect: 'Efek Mode ON: DNS aman (DoH) pribadi aktif dengan token rahasia. Serpent-256, ARIA-256-GCM, dan CAST-256 juga menambah lapisan enkripsi pada private key di perangkat ini. Pilih berapa pun, tanpa batas.',
     items: [
       { id: 'x448', name: 'X448', ready: true, desc: 'Mengamankan website dan koneksi.', ex: 'Cocok kalau kamu punya website perusahaan atau bisnis dan ingin kunjungan ke website terlindungi.' },
       { id: 'rsa2048', name: 'RSA-2048', ready: true, desc: 'Mengamankan dokumen besar, total hingga 8GB atau lebih sesuai ruang penyimpanan perangkat.', ex: 'Cocok untuk 4-5 dokumen sekaligus yang totalnya sangat besar. Kunci RSA hanya membungkus kunci acak AES-256 per file, sehingga ukuran file tidak dibatasi RSA.' },
@@ -32,6 +35,7 @@ const CATS = {
   },
   hash: {
     title: 'Hashing', icon: '🧬', blurb: 'Sidik jari file untuk membuktikan file asli atau sudah dipalsukan. Pilihan hash juga dipakai untuk blok ledger.',
+    effect: 'Efek Mode ON: semua hash yang aktif dipakai bersamaan saat membandingkan file dan mencatat ledger, dan semuanya harus cocok. DNS aman ikut aktif.',
     items: [
       { id: 'sha256', name: 'SHA-256', ready: true, desc: 'Sidik jari file. File sama menghasilkan sidik jari sama, diubah satu huruf saja sidik jarinya berbeda.', ex: 'Upload kontrak yang kamu terima dan kontrak aslinya. Kalau sidik jari cocok, file tidak diubah.' },
       { id: 'ripemd320', name: 'RIPEMD-320', ready: true, desc: 'Sidik jari file versi lebih panjang (320 bit).', ex: 'Dipakai sebagai pembanding kedua untuk arsip penting.' }
@@ -39,35 +43,84 @@ const CATS = {
   },
   sig: {
     title: 'Tanda Tangan Digital', icon: '✍️', blurb: 'Bukti bahwa dokumen ini ditandatangani oleh kamu.',
+    effect: 'Efek Mode ON: dokumen ditandatangani dengan semua algoritma yang aktif (tanda tangan ganda), dan verifikasi mewajibkan semuanya sah. DNS aman ikut aktif.',
     items: [
       { id: 'ed448', name: 'Goldilocks / Curve448 (Ed448)', ready: true, desc: 'Tanda tangan dengan kurva Goldilocks, tingkat keamanan tinggi.', ex: 'Upload surat perjanjian, kamu mendapat bukti tanda tangan yang tidak bisa dipalsukan orang lain.' },
       { id: 'ecdsa', name: 'ECDSA', ready: true, desc: 'Tanda tangan standar yang dipakai banyak aplikasi.', ex: 'Menandatangani laporan yang akan diperiksa lewat aplikasi lain.' },
       { id: 'schnorr', name: 'Schnorr', ready: true, desc: 'Tanda tangan ringkas dan cepat diperiksa.', ex: 'Menandatangani banyak dokumen sekaligus dengan bukti yang ringan.' }
     ]
   },
-  combo: { title: 'Kombinasi Crypto', icon: '🧩', blurb: 'Pilih satu dari tiap kategori, lalu Key Vault milikmu dirakit otomatis.', items: [{ id: 'combo', name: 'Key Vault Kombinasi', ready: true, desc: 'Gabungan satu enkripsi, satu hashing, satu tanda tangan digital dalam satu alur.', ex: 'Masukkan banyak dokumen kapan saja: dihash, ditandatangani, lalu dienkripsi. Mode ON mengaktifkan DNS terenkripsi untuk berinternet lebih aman.' }] }
+  combo: {
+    title: 'Kombinasi Crypto', icon: '🧩', blurb: 'Pilih satu dari tiap kategori, lalu Key Vault milikmu dirakit otomatis.',
+    effect: 'Efek Mode ON: DNS aman (DoH) pribadi aktif.',
+    items: [{ id: 'combo', name: 'Key Vault Kombinasi', ready: true, desc: 'Gabungan satu enkripsi, satu hashing, satu tanda tangan digital dalam satu alur.', ex: 'Masukkan banyak dokumen kapan saja: dihash, ditandatangani, lalu dienkripsi. Mode ON mengaktifkan DNS terenkripsi untuk berinternet lebih aman.' }]
+  }
 };
 const sel = { enc: 'x448', hash: 'sha256', sig: 'ed448' };
-let active = [];
 
-// ---------- Vault lokal ----------
-let vault = JSON.parse(localStorage.getItem('kv.vault') || 'null');
-const saveVault = () => localStorage.setItem('kv.vault', JSON.stringify(vault));
+// ---------- Penyimpanan lokal ----------
+const K_VAULT = 'kv.vault2', K_LEGACY = 'kv.vault', K_MODES = 'kv.modes', K_SERVERS = 'kv.servers';
+let vault = null, master = null, vaultMeta = null, authKey = null;
+let modes = JSON.parse(localStorage.getItem(K_MODES) || '[]');
+const saveModes = () => localStorage.setItem(K_MODES, JSON.stringify(modes));
+const CASCADE = ['serpent256', 'aria256gcm', 'cast256'];
+const cascadeLayers = () => CASCADE.filter((a) => modes.includes(a));
+const modesOf = (cat) => CATS[cat].items.map((i) => i.id).filter((id) => modes.includes(id));
+const hashAlgos = () => { const a = modesOf('hash'); return a.length ? a : [sel.hash]; };
+const sigAlgos = () => { const a = modesOf('sig'); return a.length ? a : [sel.sig]; };
 
-async function createVault() {
+// ---------- Vault: private key dilindungi kata sandi ----------
+async function storeVault() {
+  const header = { v: 2, addr: vault.addr, salt: hex(vaultMeta.salt), iter: vaultMeta.iter, layers: cascadeLayers() };
+  localStorage.setItem(K_VAULT, JSON.stringify(await sealVault(vault, master, header)));
+}
+async function loadAuthKey() {
+  authKey = await crypto.subtle.importKey('jwk', vault.p256, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+}
+async function newAuthKeys() {
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  return { p256: await crypto.subtle.exportKey('jwk', pair.privateKey), p256pub: new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)) };
+}
+async function protect(pass) {
+  vaultMeta = { salt: crypto.getRandomValues(new Uint8Array(16)), iter: ITER };
+  master = await deriveMaster(pass, vaultMeta.salt, vaultMeta.iter);
+  await storeVault();
+  await loadAuthKey();
+}
+async function createVault(pass) {
   const edPriv = ed448.utils.randomPrivateKey();
   const edPub = ed448.getPublicKey(edPriv);
-  const addr = b32(sha256(edPub)).slice(0, 26);
+  const auth = await newAuthKeys();
   const pair = await crypto.subtle.generateKey({ name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['encrypt', 'decrypt']);
   vault = {
-    addr,
+    addr: b32(sha256(cat(edPub, auth.p256pub))).slice(0, 26),
     ed: hex(edPriv),
+    edPub: hex(edPub),
     x: hex(x448.utils.randomPrivateKey()),
     sp: hex(secp256k1.utils.randomPrivateKey()),
     rsa: await crypto.subtle.exportKey('jwk', pair.privateKey),
-    rsaPub: await crypto.subtle.exportKey('jwk', pair.publicKey)
+    rsaPub: await crypto.subtle.exportKey('jwk', pair.publicKey),
+    p256: auth.p256,
+    p256pub: hex(auth.p256pub)
   };
-  saveVault();
+  await protect(pass);
+}
+async function migrateLegacy(pass) {
+  const old = JSON.parse(localStorage.getItem(K_LEGACY));
+  const edPub = ed448.getPublicKey(unhex(old.ed));
+  const auth = await newAuthKeys();
+  vault = { ...old, edPub: hex(edPub), p256: auth.p256, p256pub: hex(auth.p256pub), addr: b32(sha256(cat(edPub, auth.p256pub))).slice(0, 26) };
+  await protect(pass);
+  localStorage.removeItem(K_LEGACY);
+}
+async function unlockVault(pass) {
+  const stored = JSON.parse(localStorage.getItem(K_VAULT));
+  const header = JSON.parse(stored.h);
+  const salt = unhex(header.salt);
+  const m = await deriveMaster(pass, salt, header.iter);
+  try { vault = await openVault(stored, m); } catch { throw new Error('Kata sandi salah atau data vault rusak'); }
+  master = m; vaultMeta = { salt, iter: header.iter };
+  await loadAuthKey();
 }
 
 // ---------- File helpers ----------
@@ -189,7 +242,7 @@ async function decryptFile(file) {
   await sink.close();
 }
 
-// ---------- Tanda tangan ----------
+// ---------- Tanda tangan (tunggal atau ganda) ----------
 function signHash(algo, h) {
   const m = unhex(h);
   if (algo === 'ed448') { const p = unhex(vault.ed); return { pub: hex(ed448.getPublicKey(p)), sig: hex(ed448.sign(m, p)) }; }
@@ -204,67 +257,105 @@ function verifyHash(algo, h, pub, sig) {
   if (algo === 'schnorr') return schnorr.verify(unhex(sig), m, unhex(pub));
   return false;
 }
-async function signFile(file, algo, hashAlgo = 'sha256') {
+async function signFile(file, algos, hashAlgo = 'sha256') {
   const h = await hashFile(file, hashAlgo);
-  const { pub, sig } = signHash(algo, h);
+  const sigs = algos.map((a) => ({ algo: a, ...signHash(a, h) }));
   const sink = await openSink(file.name + '.sig.json');
-  await sink.write(enc.encode(JSON.stringify({ file: file.name, algo, hash: hashAlgo, digest: h, pub, sig, address: vault.addr }, null, 2)));
+  await sink.write(enc.encode(JSON.stringify({ file: file.name, hash: hashAlgo, digest: h, address: vault.addr, sigs }, null, 2)));
   await sink.close();
   return h;
 }
 
-// ---------- API ----------
-// Alamat server: website di GitHub Pages otomatis memakai server Cloudflare Workers ini; kotak Server bisa menggantinya
+// ---------- Koneksi server global (otomatis memilih server tercepat, failover, sinkron jam) ----------
+// Website di GitHub Pages memakai server Cloudflare Workers ini; server lain bisa ditambahkan di kotak Server.
 const DEFAULT_SERVER = location.hostname.endsWith('github.io') ? 'https://keyvault-web.aste53347.workers.dev' : '';
-let base = (localStorage.getItem('kv.server') || DEFAULT_SERVER).replace(/\/+$/, '');
-let serverOk = false;
-const api = async (url, body) => {
-  try {
-    const r = await fetch(base + url, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined);
-    return { ok: r.ok, data: await r.json().catch(() => ({})) };
-  } catch {
-    return { ok: false, data: { error: 'Server tidak terjangkau' } };
+const userServers = () => JSON.parse(localStorage.getItem(K_SERVERS) || '[]');
+const serverList = () => [...new Set([DEFAULT_SERVER, ...userServers()])];
+let base = DEFAULT_SERVER, serverOk = false, clockOffset = 0, srvInfo = null, loopTimer = null;
+
+async function probe(s) {
+  const t0 = performance.now();
+  const r = await fetch(s + '/api/health', { cache: 'no-store', signal: AbortSignal.timeout(6000) });
+  const j = await r.json();
+  if (!r.ok || j.nama !== 'Key Vault API' || !j.kv) throw new Error('Bukan server Key Vault');
+  const ms = Math.round(performance.now() - t0);
+  return { s, ms, colo: j.colo, offset: j.waktu - (Date.now() - ms / 2) };
+}
+async function connectServer() {
+  const results = await Promise.allSettled(serverList().map(probe));
+  const ok = results.filter((r) => r.status === 'fulfilled').map((r) => r.value).sort((a, b) => a.ms - b.ms);
+  if (ok.length) { base = ok[0].s; clockOffset = ok[0].offset; srvInfo = ok[0]; serverOk = true; } else { serverOk = false; srvInfo = null; }
+  renderServerStatus();
+  return serverOk;
+}
+function renderServerStatus() {
+  const st = $('#srvStat'), lst = $('#srvList');
+  if (st) {
+    st.textContent = serverOk
+      ? `Terhubung ke ${base || location.origin} (${srvInfo.colo ? 'edge ' + srvInfo.colo + ', ' : ''}${srvInfo.ms} ms)`
+      : 'Server belum terhubung, mencoba lagi otomatis. Alamat, enkripsi, hashing, dan tanda tangan tetap berfungsi.';
+    st.className = 'small mb-2 ' + (serverOk ? 'text-success' : 'text-warning');
   }
-};
-async function refreshServer() {
-  const r = await api('/api/ledger?limit=1');
-  serverOk = r.ok && Array.isArray(r.data.blocks);
-  const st = $('#srvStat');
-  if (st) st.textContent = serverOk ? 'Terhubung ke ' + (base || location.origin) : 'Server belum aktif. Ledger dan mode ON mati; alamat, enkripsi, hashing, dan tanda tangan tetap berfungsi.';
+  if (lst) lst.textContent = 'Daftar server: ' + serverList().map((s) => s || location.origin).join(', ');
 }
-function mountServerBox() {
-  if ($('#srvBox')) return;
-  const box = el('div', 'card bg-dark border-secondary mt-3'); box.id = 'srvBox';
-  const body = el('div', 'card-body'); box.appendChild(body);
-  body.appendChild(el('div', 'fw-semibold mb-1', 'Server (ledger dan mode ON)'));
-  const st = el('div', 'small-note mb-2'); st.id = 'srvStat'; body.appendChild(st);
-  const row = el('div', 'input-group');
-  const inp = el('input', 'form-control'); inp.id = 'srvUrl'; inp.placeholder = 'https://xxxx.workers.dev'; inp.value = base;
-  const b = el('button', 'btn btn-outline-light', 'Hubungkan');
-  b.onclick = async () => {
-    const v = inp.value.trim().replace(/\/+$/, '');
-    if (v && !/^https?:\/\/\S+$/.test(v)) { st.textContent = 'Alamat server harus diawali https://'; return; }
-    base = v || DEFAULT_SERVER; localStorage.setItem('kv.server', v); inp.value = base;
-    await refreshServer(); await loadModes(); loadLedger(); renderPanel(currentCat); renderDoh();
-  };
-  row.appendChild(inp); row.appendChild(b); body.appendChild(row);
-  body.appendChild(el('div', 'small-note mt-2', 'Server hanya menerima alamat anonim dan blok ledger. Untuk memakai server sendiri (Cloudflare Workers atau npm start dari repo GitHub), tempel link HTTPS-nya di sini. Kosongkan kolom lalu tekan Hubungkan untuk kembali ke server bawaan.'));
-  $('#dohBox').before(box);
+async function authHeaders(method, path, text) {
+  const ts = Math.round(Date.now() + clockOffset);
+  const host = new URL(base || location.origin).host;
+  const msg = enc.encode(`KV1\n${host}\n${method}\n${path}\n${ts}\n${hex(sha256(enc.encode(text)))}`);
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, authKey, msg));
+  return { 'x-kv-ed': vault.edPub, 'x-kv-p256': vault.p256pub, 'x-kv-ts': String(ts), 'x-kv-sig': hex(sig) };
 }
+async function api(path, body, auth = false) {
+  try {
+    const method = body ? 'POST' : 'GET';
+    const text = body ? JSON.stringify(body) : '';
+    const headers = body ? { 'content-type': 'application/json' } : {};
+    if (auth) Object.assign(headers, await authHeaders(method, path, text));
+    const r = await fetch(base + path, { method, headers, body: body ? text : undefined });
+    return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+  } catch {
+    return { ok: false, status: 0, data: { error: 'Server tidak terjangkau' } };
+  }
+}
+async function connectLoop() {
+  const was = serverOk;
+  await connectServer();
+  if (serverOk && !was) { await syncModes(); await loadLedger(); renderDoh(); renderPanel(currentCat); }
+  if (!serverOk && was) { await loadLedger(); renderDoh(); }
+  if (!serverOk && !was) await loadLedger();
+  clearTimeout(loopTimer);
+  loopTimer = setTimeout(connectLoop, serverOk ? 60000 : 15000);
+}
+
+// ---------- Mode ON: efek lokal + DNS aman berautentikasi di server ----------
+const dohToken = () => hex(sha256(enc.encode('kv-doh-token|' + vault.ed))).slice(0, 32);
+const dohHash = () => hex(sha256(enc.encode(dohToken())));
+const dohUrl = () => `${base || location.origin}/dns/${vault.addr}/${dohToken()}`;
+const dohProfileUrl = () => `${base || location.origin}/dns-profile/${vault.addr}/${dohToken()}.mobileconfig`;
+let panelNote = '', panelNoteOk = true;
+
 async function setMode(algo, on) {
-  if (!serverOk) { alert('Server belum aktif. Isi alamat server di kotak Server di bawah, atau jalankan npm start dari repo GitHub.'); renderPanel(currentCat); return; }
-  const r = await api('/api/mode', { addr: vault.addr, algo, on });
-  if (!r.ok) alert(r.data.error || 'Gagal mengubah mode');
-  active = r.data.active || active;
-  renderPanel(currentCat);
-  renderDoh();
+  const before = cascadeLayers().join();
+  modes = on ? [...new Set([...modes, algo])] : modes.filter((a) => a !== algo);
+  saveModes();
+  panelNote = ''; panelNoteOk = true;
+  if (cascadeLayers().join() !== before) { await storeVault(); panelNote = `Private key di perangkat ini sekarang dienkripsi dengan ${1 + cascadeLayers().length} lapisan. `; }
+  if (serverOk) {
+    const r = await api('/api/mode', { addr: vault.addr, algo, on, dohHash: dohHash() }, true);
+    if (!r.ok) { panelNote += 'Server belum menerima: ' + (r.data.error || 'gagal') + '. Efek lokal tetap aktif.'; panelNoteOk = false; }
+  } else panelNote += 'Server belum terhubung; disinkronkan otomatis saat tersambung.';
+  renderPanel(currentCat); renderDoh();
 }
-async function loadModes() {
-  if (!serverOk) { active = []; renderDoh(); return; }
-  const r = await api('/api/mode?addr=' + vault.addr); active = r.data.active || []; renderDoh();
+async function syncModes() {
+  if (!serverOk || !vault) return;
+  const r = await api('/api/mode?addr=' + vault.addr, null, true);
+  if (!r.ok) return;
+  const remote = new Set(r.data.active || []);
+  for (const a of modes) if (!remote.has(a)) await api('/api/mode', { addr: vault.addr, algo: a, on: true, dohHash: dohHash() }, true);
+  for (const a of remote) if (!modes.includes(a)) await api('/api/mode', { addr: vault.addr, algo: a, on: false }, true);
 }
 async function loadLedger() {
-  if (!serverOk) { $('#ledgerStat').textContent = 'Server belum aktif, riwayat blockchain tidak tersedia.'; $('#ledgerList').textContent = ''; return; }
+  if (!serverOk) { $('#ledgerStat').textContent = 'Server belum terhubung, riwayat blockchain tidak tersedia.'; $('#ledgerList').textContent = ''; return; }
   const r = await api('/api/ledger?limit=10');
   const d = r.data;
   $('#ledgerStat').textContent = `${d.total} blok, ${(d.bytes / 1048576).toFixed(2)} MB dari ${(d.max / 1048576).toFixed(0)} MB. Blok head: 0x01`;
@@ -272,19 +363,20 @@ async function loadLedger() {
   for (const b of d.blocks || []) {
     const row = document.createElement('div');
     row.className = 'border-top border-secondary py-2';
-    row.textContent = `#${b.index} | ${b.file} | ${b.result} | ${b.algo || 'sha256'} ${b.hash.slice(0, 20)}...`;
+    row.textContent = `#${b.index} | ${b.file} | ${b.result} | ${b.algo || 'sha256'} ${b.hash.slice(0, 20)}...` + (b.signer ? ` | oleh ${b.signer.slice(0, 8)}` : '');
     box.appendChild(row);
   }
 }
 
-// ---------- DoH ----------
+// ---------- DNS aman ----------
 let rot = { n: 0, ms: 0 }, rotTimer = null;
 function renderDoh() {
-  const on = active.length > 0;
+  const on = modes.length > 0;
   $('#dohBox').classList.toggle('d-none', !on);
   if (!on) { clearInterval(rotTimer); rotTimer = null; return; }
-  $('#dohUrl').textContent = `${base || location.origin}/dns/${vault.addr}`;
-  if (rotTimer) return;
+  $('#dohUrl').textContent = serverOk ? dohUrl() : 'Menunggu koneksi ke server...';
+  const ios = $('#dohIos'); if (ios && serverOk) ios.href = dohProfileUrl();
+  if (rotTimer || !serverOk) return;
   const sync = async () => { const r = await api('/api/rotation?addr=' + vault.addr); rot = { n: r.data.n, ms: Date.now() + r.data.nextMs }; };
   sync();
   rotTimer = setInterval(() => {
@@ -295,7 +387,9 @@ function renderDoh() {
 }
 
 // ---------- UI ----------
-let currentCat = null;
+let currentCat = null, busy = 0;
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
+function status(box, msg, ok = true) { box.className = 'small mt-2 ' + (ok ? 'text-success' : 'text-danger'); box.textContent = msg; }
 function renderCats() {
   const box = $('#cats'); box.textContent = '';
   for (const [k, c] of Object.entries(CATS)) {
@@ -305,12 +399,10 @@ function renderCats() {
     card.innerHTML = '<div class="card-body text-center p-3"><div class="fs-3"></div><div class="fw-semibold small mt-1"></div></div>';
     card.querySelector('.fs-3').textContent = c.icon;
     card.querySelector('.fw-semibold').textContent = c.title;
-    card.onclick = () => { currentCat = k; renderCats(); renderPanel(k); };
+    card.onclick = () => { currentCat = k; panelNote = ''; renderCats(); renderPanel(k); };
     col.appendChild(card); box.appendChild(col);
   }
 }
-function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
-function status(box, msg, ok = true) { box.className = 'small mt-2 ' + (ok ? 'text-success' : 'text-danger'); box.textContent = msg; }
 
 function renderPanel(k) {
   const panel = $('#panel'); panel.textContent = '';
@@ -319,7 +411,8 @@ function renderPanel(k) {
   const card = el('div', 'card bg-dark border-secondary');
   const body = el('div', 'card-body'); card.appendChild(body);
   body.appendChild(el('div', 'h5', c.title));
-  body.appendChild(el('div', 'small-note mb-3', c.blurb));
+  body.appendChild(el('div', 'small-note mb-1', c.blurb));
+  body.appendChild(el('div', 'small-note mb-3', c.effect));
 
   for (const it of c.items) {
     const row = el('div', 'algo-row border border-secondary rounded p-3 mb-2' + (it.ready ? '' : ' off'));
@@ -336,14 +429,15 @@ function renderPanel(k) {
     left.appendChild(el('div', 'small-note mt-1', 'Contoh: ' + it.ex));
     const sw = el('div', 'form-check form-switch');
     const cb = el('input', 'form-check-input'); cb.type = 'checkbox'; cb.role = 'switch';
-    cb.disabled = !it.ready; cb.checked = active.includes(it.id);
+    cb.disabled = !it.ready; cb.checked = modes.includes(it.id);
     cb.onchange = () => setMode(it.id, cb.checked);
     sw.appendChild(cb); sw.appendChild(el('label', 'form-check-label small', cb.checked ? 'ON' : 'OFF'));
     top.appendChild(left); top.appendChild(sw); row.appendChild(top); body.appendChild(row);
   }
-  body.appendChild(el('div', 'small-note mb-3', `Mode ON aktif: ${active.length}/2. Maksimal 2 mode bersamaan.`));
+  body.appendChild(el('div', 'small-note mb-3', `Mode ON aktif: ${modes.length}. Bebas memilih berapa pun.`));
 
   const out = el('div');
+  if (panelNote) status(out, panelNote, panelNoteOk);
   const mkFile = (label, multiple = false, accept) => {
     const w = el('div', 'mb-2'); w.appendChild(el('label', 'form-label small', label));
     const i = el('input', 'form-control'); i.type = 'file'; i.multiple = multiple; if (accept) i.accept = accept;
@@ -351,7 +445,7 @@ function renderPanel(k) {
   };
   const btn = (text, cls, fn) => {
     const b = el('button', 'btn ' + cls + ' me-2 mb-1', text);
-    b.onclick = async () => { try { b.disabled = true; await fn(); } catch (e) { status(out, e.message || 'Gagal', false); } finally { b.disabled = false; } };
+    b.onclick = async () => { busy++; try { b.disabled = true; await fn(); } catch (e) { status(out, e.message || 'Gagal', false); } finally { busy--; b.disabled = false; } };
     body.appendChild(b); return b;
   };
 
@@ -364,25 +458,39 @@ function renderPanel(k) {
     const a = mkFile('File asli'); const b = mkFile('File yang dibandingkan');
     btn('Bandingkan', 'btn-primary', async () => {
       if (!a.files[0] || !b.files[0]) throw new Error('Pilih kedua file');
-      const algo = sel.hash;
-      const [h1, h2] = [await hashFile(a.files[0], algo), await hashFile(b.files[0], algo)];
-      if (h1 === h2) {
-        const r = await api('/api/ledger', { file: b.files[0].name, algo, a: h1, b: h2 });
-        status(out, `ASLI (${algo}): ${h1}` + (r.ok ? ` | Tercatat di blok #${r.data.block.index}` : ' | Ledger: ' + (r.data.error || 'server belum aktif')));
-        loadLedger();
-      } else status(out, `TIDAK SAMA (dipalsukan atau berbeda). Asli: ${h1.slice(0, 16)}... Dibandingkan: ${h2.slice(0, 16)}...`, false);
+      const algos = hashAlgos(); const lines = []; const digests = {};
+      for (const algo of algos) {
+        const [h1, h2] = [await hashFile(a.files[0], algo), await hashFile(b.files[0], algo)];
+        digests[algo] = h1 === h2 ? h1 : null;
+        lines.push(`${algo}: ${h1 === h2 ? 'cocok' : 'BEDA'}`);
+      }
+      if (algos.some((x) => !digests[x])) { status(out, `TIDAK SAMA (dipalsukan atau berbeda). ${lines.join(' | ')}`, false); return; }
+      const notes = [];
+      for (const algo of algos) {
+        if (!serverOk) { notes.push('Ledger: server belum terhubung'); break; }
+        const r = await api('/api/ledger', { file: b.files[0].name, algo, a: digests[algo], b: digests[algo] }, true);
+        notes.push(r.ok ? `blok #${r.data.block.index} (${algo})` : `Ledger ${algo}: ${r.data.error || 'gagal'}`);
+      }
+      status(out, `ASLI. ${lines.join(' | ')} | ${notes.join(' | ')}`);
+      loadLedger();
     });
   }
   if (k === 'sig') {
     const f = mkFile('Dokumen');
-    btn('Tanda Tangani', 'btn-primary', async () => { if (!f.files[0]) throw new Error('Pilih dokumen'); const h = await signFile(f.files[0], sel.sig, sel.hash); status(out, `Ditandatangani (${sel.sig} + ${sel.hash}). Digest: ${h}`); });
+    btn('Tanda Tangani', 'btn-primary', async () => {
+      if (!f.files[0]) throw new Error('Pilih dokumen');
+      const algos = sigAlgos(), ha = hashAlgos()[0];
+      const h = await signFile(f.files[0], algos, ha);
+      status(out, `Ditandatangani dengan ${algos.join(' + ')} (hash ${ha}). Digest: ${h}`);
+    });
     const s = mkFile('File tanda tangan (.sig.json) untuk verifikasi', false, '.json');
     btn('Verifikasi', 'btn-outline-light', async () => {
       if (!f.files[0] || !s.files[0]) throw new Error('Pilih dokumen dan file tanda tangan');
       const j = JSON.parse(await s.files[0].text());
+      const list = j.sigs || [{ algo: j.algo, pub: j.pub, sig: j.sig }];
       const h = await hashFile(f.files[0], j.hash || 'sha256');
-      const ok = h === (j.digest || j.sha256) && verifyHash(j.algo, h, j.pub, j.sig);
-      status(out, ok ? `Tanda tangan sah (${j.algo}), alamat penanda tangan: ${j.address}` : 'Tanda tangan TIDAK sah atau dokumen berubah.', ok);
+      const ok = h === (j.digest || j.sha256) && list.every((x) => verifyHash(x.algo, h, x.pub, x.sig));
+      status(out, ok ? `Tanda tangan sah (${list.map((x) => x.algo).join(' + ')}), alamat penanda tangan: ${j.address}` : 'Tanda tangan TIDAK sah atau dokumen berubah.', ok);
     });
   }
   if (k === 'combo') {
@@ -395,18 +503,73 @@ function renderPanel(k) {
     }
     const f = mkFile('Dokumen (banyak file)', true);
     btn('Proses ke Key Vault', 'btn-primary', async () => {
-      for (const x of f.files) { await signFile(x, sel.sig, sel.hash); await encryptFile(x, sel.enc); }
-      status(out, `Selesai: ${f.files.length} dokumen di-hash (${sel.hash}), ditandatangani (${sel.sig}), dan dienkripsi (${sel.enc}).`);
+      const algos = sigAlgos(), ha = hashAlgos()[0];
+      for (const x of f.files) { await signFile(x, algos, ha); await encryptFile(x, sel.enc); }
+      status(out, `Selesai: ${f.files.length} dokumen di-hash (${ha}), ditandatangani (${algos.join(' + ')}), dan dienkripsi (${sel.enc}).`);
     });
   }
   body.appendChild(out);
   panel.appendChild(card);
 }
 
+function mountServerBox() {
+  if ($('#srvBox')) return;
+  const box = el('div', 'card bg-dark border-secondary mt-3'); box.id = 'srvBox';
+  const body = el('div', 'card-body'); box.appendChild(body);
+  body.appendChild(el('div', 'fw-semibold mb-1', 'Server global (ledger dan DNS aman)'));
+  const st = el('div', 'small mb-2'); st.id = 'srvStat'; body.appendChild(st);
+  const lst = el('div', 'small-note mb-2'); lst.id = 'srvList'; body.appendChild(lst);
+  const row = el('div', 'input-group');
+  const inp = el('input', 'form-control'); inp.id = 'srvUrl'; inp.placeholder = 'https://server-lain.workers.dev';
+  const add = el('button', 'btn btn-outline-light', 'Tambah');
+  const rst = el('button', 'btn btn-outline-secondary', 'Reset');
+  add.onclick = async () => {
+    const v = inp.value.trim().replace(/\/+$/, '');
+    if (!/^https:\/\/\S+$/.test(v) && !/^http:\/\/localhost(:\d+)?$/.test(v)) { st.textContent = 'Alamat server harus diawali https://'; return; }
+    const l = userServers(); if (!l.includes(v)) l.push(v);
+    localStorage.setItem(K_SERVERS, JSON.stringify(l)); inp.value = '';
+    await connectLoop();
+  };
+  rst.onclick = async () => { localStorage.removeItem(K_SERVERS); await connectLoop(); };
+  row.append(inp, add, rst); body.appendChild(row);
+  body.appendChild(el('div', 'small-note mt-2', 'Aplikasi otomatis memilih server tercepat dan berpindah sendiri bila satu server mati. Tiap server menyimpan ledger dan profilnya sendiri. Server hanya menerima alamat anonim dan blok ledger; semua permintaan data pribadi ditandatangani dengan kunci milikmu.'));
+  $('#dohBox').before(box);
+}
+function mountDohHelp() {
+  if ($('#dohHelp')) return;
+  const host = $('#dohBox .card-body'); if (!host) return;
+  const wrap = el('div', 'mt-2'); wrap.id = 'dohHelp';
+  const copy = el('button', 'btn btn-sm btn-success me-2 mb-1', 'Salin alamat DNS');
+  copy.onclick = async () => {
+    if (!serverOk) return;
+    await navigator.clipboard.writeText(dohUrl());
+    copy.textContent = 'Tersalin'; setTimeout(() => { copy.textContent = 'Salin alamat DNS'; }, 2000);
+  };
+  const ios = el('a', 'btn btn-sm btn-outline-light mb-1', 'iPhone/iPad: pasang otomatis'); ios.id = 'dohIos';
+  wrap.append(copy, ios);
+  wrap.appendChild(el('div', 'small-note mt-2', 'Android (Chrome): ketuk Salin alamat DNS, lalu Chrome > titik tiga > Setelan > Privasi dan keamanan > Gunakan DNS aman > Pilih penyedia lain > tempel > simpan. Firefox: Setelan > Privasi dan keamanan > DNS melalui HTTPS > Kustom > tempel. iPhone/iPad: ketuk tombol pasang otomatis, lalu Setelan > Profil Diunduh > Pasang. Nama menu bisa sedikit berbeda di tiap versi. Pengaturan Private DNS bawaan Android tidak bisa dipakai untuk ini. DNS aman menyembunyikan situs yang kamu cari dari penyedia internet; situs tujuan tetap melihat IP-mu.'));
+  host.appendChild(wrap);
+}
+function mountLockButton() {
+  if ($('#btnLock')) return;
+  const b = el('button', 'btn btn-sm btn-outline-warning', 'Kunci Sekarang'); b.id = 'btnLock';
+  b.onclick = () => location.reload();
+  $('#btnBackup').after(b);
+}
+let idleTimer = null, idleOn = false;
+const IDLE_MS = 10 * 60 * 1000;
+function startIdleLock() {
+  if (idleOn) return;
+  idleOn = true;
+  const reset = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => (busy ? reset() : location.reload()), IDLE_MS); };
+  ['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach((ev) => document.addEventListener(ev, reset, { passive: true }));
+  reset();
+}
+
 // ---------- Dokumen kebijakan ----------
 const DOCS = {
-  privacy: ['Kebijakan Privasi', 'Key Vault tidak meminta email atau nomor telepon. Kunci dan dokumen diproses di browser kamu dan tidak diunggah. Server tidak mencatat alamat IP, tidak meneruskan IP ke DNS upstream, dan hanya menyimpan: alamat anonim, daftar mode ON, dan blok ledger (nama file, dua hash yang dibandingkan, hasil). Cadangan kunci adalah tanggung jawab kamu: kunci yang hilang tidak bisa dipulihkan siapa pun.'],
-  rules: ['Aturan', 'Gunakan Key Vault untuk melindungi data milikmu sendiri. Dilarang memakainya untuk melanggar hukum, menyerang sistem lain, atau menyebarkan konten ilegal. Ledger hanya mencatat perbandingan yang sah (hash sama). Maksimal 2 mode ON bersamaan. Layanan diberikan apa adanya.'],
+  privacy: ['Kebijakan Privasi', 'Key Vault tidak meminta email atau nomor telepon. Kunci dan dokumen diproses di browser kamu dan tidak diunggah. Private key disimpan terenkripsi dengan kata sandi milikmu dan hanya terbuka di memori saat vault dibuka. Server tidak mencatat alamat IP, tidak meneruskan IP ke DNS upstream, dan hanya menyimpan: alamat anonim, daftar mode ON, hash token DNS, dan blok ledger (nama file, hash yang dibandingkan, hasil, alamat penanda tangan). Kata sandi dan cadangan kunci adalah tanggung jawab kamu: yang hilang tidak bisa dipulihkan siapa pun.'],
+  rules: ['Aturan', 'Gunakan Key Vault untuk melindungi data milikmu sendiri. Dilarang memakainya untuk melanggar hukum, menyerang sistem lain, atau menyebarkan konten ilegal. Ledger hanya mencatat perbandingan yang sah (hash sama), maksimal 30 catatan per alamat per jam. Layanan diberikan apa adanya.'],
   copyright: ['Copyright', '© 2026 Farrel. Seluruh hak cipta atas Key Vault dilindungi. Pustaka pihak ketiga (Bootstrap, noble-curves, noble-hashes) memakai lisensi masing-masing.']
 };
 document.querySelectorAll('[data-doc]').forEach((a) => a.addEventListener('click', (e) => {
@@ -417,21 +580,65 @@ document.querySelectorAll('[data-doc]').forEach((a) => a.addEventListener('click
 }));
 
 // ---------- Mulai ----------
+let entered = false;
 async function enter() {
   $('#hero').classList.add('d-none'); $('#main').classList.remove('d-none');
   $('#addr').textContent = vault.addr;
-  mountServerBox(); await refreshServer(); renderCats(); await loadModes(); loadLedger();
+  mountServerBox(); mountLockButton(); mountDohHelp();
+  renderCats(); renderDoh();
+  if (!entered) { entered = true; startIdleLock(); window.addEventListener('online', connectLoop); }
+  await connectLoop();
 }
-$('#btnAddr').onclick = async () => {
-  const b = $('#btnAddr'); b.disabled = true; b.textContent = 'Membuat alamat...';
-  try { if (!vault) await createVault(); await enter(); } finally { b.disabled = false; b.textContent = 'Dapatkan Alamat'; }
+function showPassForm({ title, confirm, button, onSubmit }) {
+  const old = $('#lockBox'); if (old) old.remove();
+  const box = el('div', 'mt-3 mx-auto text-start'); box.id = 'lockBox'; box.style.maxWidth = '360px';
+  box.appendChild(el('div', 'fw-semibold mb-2', title));
+  const p1 = el('input', 'form-control mb-2'); p1.type = 'password'; p1.placeholder = 'Kata sandi vault'; p1.autocomplete = confirm ? 'new-password' : 'current-password';
+  box.appendChild(p1);
+  let p2 = null;
+  if (confirm) {
+    p2 = el('input', 'form-control mb-2'); p2.type = 'password'; p2.placeholder = 'Ulangi kata sandi'; p2.autocomplete = 'new-password';
+    box.appendChild(p2);
+    box.appendChild(el('div', 'small-note mb-2', 'Minimal 10 karakter. Kata sandi melindungi private key dan tidak bisa dipulihkan siapa pun, termasuk server.'));
+  }
+  const msg = el('div', 'small text-danger mb-2'); box.appendChild(msg);
+  const go = el('button', 'btn btn-primary w-100', button); box.appendChild(go);
+  go.onclick = async () => {
+    msg.textContent = '';
+    if (confirm) {
+      if (p1.value.length < 10) { msg.textContent = 'Minimal 10 karakter'; return; }
+      if (p1.value !== p2.value) { msg.textContent = 'Kata sandi tidak sama'; return; }
+    } else if (!p1.value) { msg.textContent = 'Isi kata sandi'; return; }
+    go.disabled = true; go.textContent = 'Memproses...';
+    try { await onSubmit(p1.value); box.remove(); } catch (e) { msg.textContent = e.message || 'Gagal'; go.disabled = false; go.textContent = button; }
+  };
+  p1.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
+  if (p2) p2.onkeydown = (e) => { if (e.key === 'Enter') go.click(); };
+  $('#btnAddr').after(box); p1.focus();
+}
+$('#btnAddr').onclick = () => {
+  if (vault) return enter();
+  if (localStorage.getItem(K_VAULT)) return showPassForm({ title: 'Buka Key Vault', button: 'Buka', onSubmit: async (p) => { await unlockVault(p); await enter(); } });
+  if (localStorage.getItem(K_LEGACY)) return showPassForm({ title: 'Amankan vault lama dengan kata sandi', confirm: true, button: 'Amankan', onSubmit: async (p) => { await migrateLegacy(p); await enter(); } });
+  showPassForm({ title: 'Buat kata sandi vault', confirm: true, button: 'Buat Key Vault', onSubmit: async (p) => { await createVault(p); await enter(); } });
 };
 $('#btnCopy').onclick = () => navigator.clipboard.writeText(vault.addr);
-$('#btnBackup').onclick = async () => { const s = await openSink('keyvault-backup.json'); await s.write(enc.encode(JSON.stringify(vault))); await s.close(); };
+$('#btnBackup').onclick = async () => {
+  const raw = localStorage.getItem(K_VAULT);
+  if (!raw) return alert('Tidak ada vault tersimpan');
+  const s = await openSink('keyvault-backup.json'); await s.write(enc.encode(raw)); await s.close();
+};
 $('#restore').onchange = async (e) => {
   const f = e.target.files[0]; if (!f) return;
-  const v = JSON.parse(await f.text());
-  if (!/^[a-z2-7]{26}$/.test(v.addr || '') || !v.ed || !v.x || !v.sp || !v.rsa || !v.rsaPub) return alert('File cadangan tidak valid');
-  vault = v; saveVault(); await enter();
+  try {
+    const j = JSON.parse(await f.text());
+    if (j.h && j.ct) {
+      if (!/^[a-z2-7]{26}$/.test(JSON.parse(j.h).addr)) throw new Error('x');
+      if (localStorage.getItem(K_VAULT) && !confirm('Vault di perangkat ini akan diganti. Lanjutkan?')) return;
+      localStorage.setItem(K_VAULT, JSON.stringify(j));
+    } else if (j.ed && j.rsa && j.rsaPub && j.sp && j.x) localStorage.setItem(K_LEGACY, JSON.stringify(j));
+    else throw new Error('x');
+  } catch { return alert('File cadangan tidak valid'); }
+  location.reload();
 };
-if (vault) $('#btnAddr').textContent = 'Buka Key Vault';
+$('#btnAddr').textContent = localStorage.getItem(K_VAULT) || localStorage.getItem(K_LEGACY) ? 'Buka Key Vault' : 'Dapatkan Alamat';
