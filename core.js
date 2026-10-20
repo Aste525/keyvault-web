@@ -10,7 +10,7 @@ const MAX_LEDGER = 10 * 1024 * 1024;
 const MAX_BODY = 8192;
 const HASH_HEX = { sha256: 64, ripemd320: 80 };
 
-// Maksimal 10 DNS upstream (DoH), berputar tiap 10 detik
+// Maksimal 10 DNS upstream (DoH)
 const UPSTREAM = [
   'https://cloudflare-dns.com/dns-query',
   'https://dns.google/dns-query',
@@ -137,17 +137,24 @@ async function appendBlock(env, signer, file, algo, a, b) {
   return { code: 200, block: blk };
 }
 
-/* ===================== DNS-over-HTTPS berputar, dengan token ===================== */
+/* ===================== DNS-over-HTTPS dengan Auto Mix, dengan token ===================== */
 const hits = new Map();
 function upstreamIndex(addr) {
   let o = 0;
   for (let i = 0; i < addr.length; i++) o = (o * 31 + addr.charCodeAt(i)) & 255;
   return (Math.floor(Date.now() / ROTATE_MS) + o) % UPSTREAM.length;
 }
+// Auto Mix DNS: tiap permintaan dikirim ke resolver acak (urutan diacak dengan RNG kriptografis),
+// sehingga tidak ada satu resolver pun yang melihat semua pencarian satu pengguna.
+function randomOrder(n) {
+  const a = Array.from({ length: n }, (_, i) => i);
+  const r = crypto.getRandomValues(new Uint32Array(n));
+  for (let i = n - 1; i > 0; i--) { const j = r[i] % (i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
 async function forwardDns(addr, query) {
-  const start = upstreamIndex(addr);
-  for (let i = 0; i < UPSTREAM.length; i++) {
-    const url = UPSTREAM[(start + i) % UPSTREAM.length];
+  for (const idx of randomOrder(UPSTREAM.length)) {
+    const url = UPSTREAM[idx];
     try {
       const r = await fetch(url, {
         method: 'POST',

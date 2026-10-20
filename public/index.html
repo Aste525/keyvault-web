@@ -64,7 +64,7 @@
           <button id="btnBackup" class="btn btn-sm btn-outline-light">Unduh Cadangan Kunci</button>
           <label class="btn btn-sm btn-outline-light mb-0">Pulihkan Kunci<input id="restore" type="file" accept=".json" hidden></label>
         </div>
-        <div class="small-note mt-2">Kunci tersimpan di perangkat ini saja. Unduh cadangan agar alamat bisa dipulihkan di perangkat lain.</div>
+        <div class="small-note mt-2">Kunci tersimpan terenkripsi dengan kata sandimu di perangkat ini. Unduh cadangan agar alamat bisa dipulihkan di perangkat lain.</div>
       </div>
     </div>
 
@@ -73,10 +73,19 @@
 
     <div id="dohBox" class="card bg-dark border-success mt-3 d-none">
       <div class="card-body">
-        <div class="fw-semibold mb-1">Mode ON aktif: DNS terenkripsi (DoH)</div>
-        <div class="small-note mb-2">Isi URL ini di pengaturan DNS-over-HTTPS perangkatmu. DNS berganti otomatis tiap 10 detik, tanpa batas waktu meski kamu keluar dari website. Alamat IP kamu tidak disimpan oleh server ini; situs yang kamu kunjungi tetap melihat IP-mu.</div>
+        <div class="fw-semibold mb-1">Mode ON aktif: Auto Mix DNS (DNS aman, DoH)</div>
+        <div class="small-note mb-2">Setiap permintaan DNS dikirim ke salah satu dari 10 resolver yang dipilih acak, jadi tidak ada satu resolver pun yang melihat semua pencarianmu. Alamat IP kamu tidak disimpan oleh server ini; situs yang kamu kunjungi tetap melihat IP-mu. Ini bukan mixnet penuh: server ini tetap melihat permintaan DNS-mu.</div>
         <div id="dohUrl" class="addr mb-2"></div>
-        <div class="small-note">DNS aktif: <span id="rotN">-</span>/10, berganti dalam <span id="rotT">-</span> detik</div>
+        <div class="small-note" style="display:none">DNS aktif: <span id="rotN">-</span>/10, berganti dalam <span id="rotT">-</span> detik</div>
+      </div>
+    </div>
+
+    <div id="allApps" class="card bg-dark border-info mt-3">
+      <div class="card-body">
+        <div class="fw-semibold mb-1">Perlindungan semua aplikasi (gratis)</div>
+        <div class="small-note mb-2">Website hanya bisa mengamankan pencarian DNS dan file yang kamu proses di sini. Untuk menyembunyikan lalu lintas semua aplikasi di Android, pasang Orbot (aplikasi gratis resmi dari Tor Project dan Guardian Project): buka Orbot, ketuk Start VPN, lalu pilih aplikasi yang mau dilindungi. Lalu lintas dipantulkan lewat beberapa relay sukarelawan di seluruh dunia, jadi tidak ada satu pihak pun yang melihat siapa kamu dan apa yang kamu buka. Kecepatan internet menjadi lebih lambat.</div>
+        <a class="btn btn-sm btn-outline-info me-2 mb-1" href="https://play.google.com/store/apps/details?id=org.torproject.android" target="_blank" rel="noopener">Orbot di Google Play</a>
+        <a class="btn btn-sm btn-outline-info mb-1" href="https://orbot.app/en/download/" target="_blank" rel="noopener">Situs resmi Orbot</a>
       </div>
     </div>
 
