@@ -10,7 +10,6 @@ const MAX_LEDGER = 10 * 1024 * 1024;
 const MAX_BODY = 8192;
 const HASH_HEX = { sha256: 64, ripemd320: 80 };
 
-// Maksimal 10 DNS upstream (DoH)
 const UPSTREAM = [
   'https://cloudflare-dns.com/dns-query',
   'https://dns.google/dns-query',
@@ -83,7 +82,6 @@ async function authenticate(req, u, bodyText) {
   return addr;
 }
 
-/* ===================== Profil mode ON per alamat ===================== */
 const cache = new Map();
 async function loadProfile(env, addr) {
   const c = cache.get(addr);
@@ -95,7 +93,7 @@ async function loadProfile(env, addr) {
   return p;
 }
 
-/* ===================== Ledger (blok head 0x01, maksimal 10MB, hash blok: SHA-256 atau RIPEMD-320) ===================== */
+/* ===================== Ledger ===================== */
 const blockData = (b) => { const d = [b.index, b.prev, b.ts, b.file, b.a, b.b, b.result]; if (b.signer) d.push(b.signer); return JSON.stringify(d); };
 async function hashBlock(algo, data) {
   if (algo === 'ripemd320') return toHex(ripemd320(enc.encode(data)));
@@ -137,7 +135,7 @@ async function appendBlock(env, signer, file, algo, a, b) {
   return { code: 200, block: blk };
 }
 
-/* ===================== DNS-over-HTTPS dengan Auto Mix, dengan token ===================== */
+/* ===================== DNS-over-HTTPS dengan Auto Mix ===================== */
 const hits = new Map();
 function upstreamIndex(addr) {
   let o = 0;
@@ -162,10 +160,30 @@ async function forwardDns(addr, query) {
         body: query,
         signal: AbortSignal.timeout(4000)
       });
-      if (r.ok) return await r.arrayBuffer();
-    } catch { /* coba upstream berikutnya */ }
+      if (r.ok) return { buf: await r.arrayBuffer(), idx };
+    } catch { /* coba resolver berikutnya */ }
   }
   return null;
+}
+
+/* ===================== Metrik nyata: hitungan DNS per alamat dan pemeriksaan jaringan ===================== */
+const metricsStub = (env, addr) => (env.METRICS ? env.METRICS.get(env.METRICS.idFromName(addr)) : null);
+function record(env, ctx, addr, kind, up) {
+  const stub = metricsStub(env, addr);
+  if (!stub) return;
+  const p = Promise.resolve(stub.fetch('https://metrics/' + kind, { method: 'POST', body: JSON.stringify({ up }) })).catch(() => {});
+  if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+}
+let torCache = { set: null, exp: 0 };
+async function isTor(ip) {
+  if (!ip) return null;
+  if (!torCache.set || torCache.exp < Date.now()) {
+    try {
+      const r = await fetch('https://check.torproject.org/torbulkexitlist', { cf: { cacheTtl: 3600, cacheEverything: true } });
+      if (r.ok) torCache = { set: new Set((await r.text()).split(/\s+/).filter(Boolean).map((x) => x.toLowerCase())), exp: Date.now() + 3600000 };
+    } catch { /* daftar tidak terjangkau: status tidak diketahui */ }
+  }
+  return torCache.set ? torCache.set.has(ip.toLowerCase()) : null;
 }
 function fromBase64Url(s) {
   const b = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
@@ -175,7 +193,7 @@ function fromBase64Url(s) {
 }
 
 /* ===================== Handler ===================== */
-export async function handle(req, env) {
+export async function handle(req, env, ctx) {
   const u = new URL(req.url);
   const p = u.pathname;
   if (req.method === 'OPTIONS') return plain(204);
@@ -185,7 +203,7 @@ export async function handle(req, env) {
     }
     if (!env.KV) throw new HttpError(500, 'Binding KV belum dipasang');
 
-    // DNS: /dns/<alamat>/<token>. Hanya jalan bila Mode ON aktif dan token cocok dengan hash yang didaftarkan pemilik alamat.
+    // DNS: /dns/<alamat>/<token>
     const m = p.match(/^\/dns\/([a-z2-7]{26})\/([0-9a-f]{32})$/);
     if (m) {
       const addr = m[1];
@@ -203,11 +221,12 @@ export async function handle(req, env) {
       else return plain(400);
       if (q.byteLength > 4096) return plain(413);
       const ans = await forwardDns(addr, q);
-      if (!ans) return plain(502);
-      return new Response(ans, { status: 200, headers: { ...CORS, 'content-type': 'application/dns-message', 'cache-control': 'no-store' } });
+      if (!ans) { record(env, ctx, addr, 'fail'); return plain(502); }
+      record(env, ctx, addr, 'hit', ans.idx);
+      return new Response(ans.buf, { status: 200, headers: { ...CORS, 'content-type': 'application/dns-message', 'cache-control': 'no-store' } });
     }
 
-    // Profil DNS untuk iPhone/iPad: satu ketukan, tanpa menempel URL
+    // Profil DNS untuk iPhone/iPad
     const mp = p.match(/^\/dns-profile\/([a-z2-7]{26})\/([0-9a-f]{32})\.mobileconfig$/);
     if (mp) {
       const prof = await loadProfile(env, mp[1]);
@@ -236,6 +255,22 @@ export async function handle(req, env) {
       return new Response(xml, { status: 200, headers: { ...CORS, 'content-type': 'application/x-apple-aspen-config', 'content-disposition': 'attachment; filename="keyvault-dns.mobileconfig"', 'cache-control': 'no-store' } });
     }
     if (p.startsWith('/dns/')) throw new HttpError(401, 'Token DNS diperlukan');
+
+    // Alamat IP yang dilihat server, hanya dikembalikan kepada pemanggilnya sendiri dan tidak disimpan
+    if (p === '/api/whoami' && req.method === 'GET') {
+      const ip = req.headers.get('cf-connecting-ip') || null;
+      const cf = req.cf || {};
+      return json(200, { ip, negara: cf.country || null, kota: cf.city || null, asn: cf.asn || null, isp: cf.asOrganization || null, colo: cf.colo || null, tor: await isTor(ip), waktu: Date.now() });
+    }
+
+    if (p === '/api/stats' && req.method === 'GET') {
+      const auth = await authenticate(req, u, '');
+      if ((u.searchParams.get('addr') || '') !== auth) throw new HttpError(403, 'Alamat tidak sesuai dengan tanda tangan');
+      const stub = metricsStub(env, auth);
+      if (!stub) return json(200, { tersedia: false });
+      const r = await stub.fetch('https://metrics/read');
+      return json(200, { tersedia: true, ...(await r.json()) });
+    }
 
     if (p === '/api/rotation' && req.method === 'GET') {
       const addr = u.searchParams.get('addr') || '';

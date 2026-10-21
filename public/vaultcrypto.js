@@ -1,14 +1,10 @@
-// vaultcrypto.js - perlindungan private key: vault dienkripsi dengan kata sandi (PBKDF2-SHA-256 600.000 iterasi),
-// lapisan dasar AES-256-GCM, ditambah lapisan berlapis Serpent-256 / ARIA-256-GCM / CAST-256 sesuai Mode ON.
 import { makeCipher, GCM } from './ciphers.js';
-
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 export const ITER = 600000;
 const hex = (b) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 const unhex = (h) => Uint8Array.from(h.match(/../g) || [], (x) => parseInt(x, 16));
 const cat = (a, b) => { const o = new Uint8Array(a.length + b.length); o.set(a, 0); o.set(b, a.length); return o; };
-
 export async function deriveMaster(pass, salt, iter = ITER) {
   const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveBits']);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, base, 256));
@@ -18,21 +14,13 @@ async function layerKey(master, name) {
   return new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: enc.encode('kv-vault-layer|' + name) }, k, 256));
 }
 async function layerSeal(name, key, iv, aad, data) {
-  if (name === 'aes256gcm') {
-    const k = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt']);
-    return new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, k, data));
-  }
+  if (name === 'aes256gcm') { const k = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt']); return new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, k, data)); }
   return new GCM(makeCipher(name, key)).seal(iv, aad, data);
 }
 async function layerOpen(name, key, iv, aad, data) {
-  if (name === 'aes256gcm') {
-    const k = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['decrypt']);
-    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, k, data));
-  }
+  if (name === 'aes256gcm') { const k = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['decrypt']); return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, k, data)); }
   return new GCM(makeCipher(name, key)).open(iv, aad, data);
 }
-
-// header: { v, addr, salt, iter, layers }. Hasil: { h: teks header (dipakai sebagai AAD), ct: hex }
 export async function sealVault(vaultObj, master, header) {
   const h = JSON.stringify(header);
   const aad = enc.encode(h);
@@ -48,8 +36,6 @@ export async function openVault(stored, master) {
   const aad = enc.encode(stored.h);
   const names = ['aes256gcm', ...header.layers];
   let data = unhex(stored.ct);
-  for (let i = names.length - 1; i >= 0; i--) {
-    data = await layerOpen(names[i], await layerKey(master, names[i]), data.slice(0, 12), aad, data.slice(12));
-  }
+  for (let i = names.length - 1; i >= 0; i--) data = await layerOpen(names[i], await layerKey(master, names[i]), data.slice(0, 12), aad, data.slice(12));
   return JSON.parse(dec.decode(data));
 }

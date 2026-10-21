@@ -5,3 +5,11 @@ workers_dev = true
 
 [[kv_namespaces]]
 binding = "KV"
+
+[[durable_objects.bindings]]
+name = "METRICS"
+class_name = "Metrics"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Metrics"]
