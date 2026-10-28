@@ -3,3 +3,6 @@ ledger.json
 modes.json
 data.json
 .env
+
+.keyvault-v2/
+public/index.html.before-security-v2

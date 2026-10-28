@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Key Vault · Keamanan V2</title>
+  <link rel="stylesheet" href="/secure.css">
+  <script defer src="/secure.js"></script>
+</head>
+<body>
+<main>
+  <header><a href="/">← Key Vault</a><h1>Key Vault · Keamanan V2</h1><p>Identitas tersimpan terenkripsi di perangkat. Mode ON mengaktifkan layanan DNS-over-HTTPS milik akun ini.</p></header>
+  <section><h2>Identitas terenkripsi</h2>
+    <label for="pass">Kata sandi brankas (minimal 12 karakter)</label>
+    <input type="password" id="pass" minlength="12" autocomplete="new-password" placeholder="Rahasia untuk membuka kunci lokal">
+    <div class="actions"><button id="create">Buat identitas</button><button id="login">Buka dan login</button><button id="lock" type="button">Kunci / logout</button></div>
+    <p id="address">Identitas belum dibuka.</p><div class="actions"><button id="export" type="button">Ekspor backup terenkripsi</button><label class="import">Impor backup terenkripsi <input id="import" type="file" accept="application/json,.json"></label></div>
+  </section>
+  <section><h2>Mode ON / OFF</h2>
+    <p>Pilih semua algoritma yang diinginkan. Tidak ada batas dua pilihan. Pilihan algoritma disimpan sebagai konfigurasi; mesin kriptografi file pada halaman utama tetap dijalankan dari fitur masing-masing.</p>
+    <div id="algorithms" class="choices"></div>
+    <label class="toggle"><input id="enabled" type="checkbox"> Aktifkan layanan keamanan DNS-over-HTTPS</label>
+    <div class="actions"><button id="save" type="button">Simpan mode ke server</button><button id="token" type="button">Buat / rotasi URL DNS privat</button></div>
+    <label for="doh">URL DNS-over-HTTPS privat</label><input id="doh" readonly placeholder="Muncul setelah mode ON dan login"><button id="copy">Salin URL</button>
+  </section>
+  <section><h2>Status koneksi backend</h2><p id="status" aria-live="polite">Memeriksa server…</p><p>Gunakan HTTPS dan domain publik untuk akses dari jaringan lain. URL DNS mengandung token rahasia. Jangan dibagikan.</p></section>
+</main>
+</body>
+</html>
