@@ -1,0 +1,6 @@
+[
+    {
+        "merged": "com.keyvault.vpn.app-debug-33:/xml_accessibility_config.xml.flat",
+        "source": "com.keyvault.vpn.app-main-35:/xml/accessibility_config.xml"
+    }
+]
