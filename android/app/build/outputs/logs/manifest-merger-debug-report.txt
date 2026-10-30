@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:2:1-46:12
-INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:2:1-46:12
-INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:2:1-46:12
-INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:2:1-46:12
+ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:2:1-47:12
+INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:2:1-47:12
+INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:2:1-47:12
+INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:2:1-47:12
 MERGED from [com.google.android.material:material:1.12.0] /data/data/com.termux/files/home/.gradle/caches/9.8.2/transforms/27337e5e2cf17f7300794527420b7a35/transformed/material-1.12.0/AndroidManifest.xml:17:1-24:12
 MERGED from [androidx.appcompat:appcompat-resources:1.7.0] /data/data/com.termux/files/home/.gradle/caches/9.8.2/transforms/42a502b06656f79a2e267388fce1b2bc/transformed/jetified-appcompat-resources-1.7.0/AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /data/data/com.termux/files/home/.gradle/caches/9.8.2/transforms/67b0e0b2cc2f95846e07ba6482848e80/transformed/constraintlayout-2.0.1/AndroidManifest.xml:2:1-11:12
@@ -85,8 +85,8 @@ ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/An
 	android:name
 		ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:9:22-78
 application
-ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:10:5-45:19
-INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:10:5-45:19
+ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:10:5-46:19
+INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:10:5-46:19
 MERGED from [com.google.android.material:material:1.12.0] /data/data/com.termux/files/home/.gradle/caches/9.8.2/transforms/27337e5e2cf17f7300794527420b7a35/transformed/material-1.12.0/AndroidManifest.xml:22:5-20
 MERGED from [com.google.android.material:material:1.12.0] /data/data/com.termux/files/home/.gradle/caches/9.8.2/transforms/27337e5e2cf17f7300794527420b7a35/transformed/material-1.12.0/AndroidManifest.xml:22:5-20
 MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /data/data/com.termux/files/home/.gradle/caches/9.8.2/transforms/67b0e0b2cc2f95846e07ba6482848e80/transformed/constraintlayout-2.0.1/AndroidManifest.xml:9:5-20
@@ -177,6 +177,12 @@ action#android.intent.action.BOOT_COMPLETED
 ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:42:17-78
 	android:name
 		ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:42:25-76
+activity#com.keyvault.vpn.UpgradeActivity
+ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:45:13-81
+	android:exported
+		ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:45:55-79
+	android:name
+		ADDED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml:45:23-54
 uses-sdk
 INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /data/data/com.termux/files/home/keyvault-web/android/app/src/main/AndroidManifest.xml

@@ -68,6 +68,10 @@
             </intent-filter>
         </receiver>
 
+        <activity
+            android:name="com.keyvault.vpn.UpgradeActivity"
+            android:exported="false" />
+
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="com.keyvault.vpn.androidx-startup"

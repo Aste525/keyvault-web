@@ -19,15 +19,26 @@ class MainActivity : AppCompatActivity() {
             setPadding(48, 48, 48, 48)
         }
         val tier = Session.getTier(this)
-        root.addView(TextView(this).apply { text = "Key Vault — ${tier.name}"; textSize = 22f })
+        root.addView(TextView(this).apply {
+            text = "Key Vault — ${tier.name}"
+            textSize = 22f
+        })
         root.addView(TextView(this).apply {
             text = when (tier) {
                 Tier.GENKAI -> "Gratis — enkripsi acak, regional, maks 30 user/DNS, 1 jam"
                 Tier.CYBORG -> "Cyborg — RIPEMD-320 + enkripsi acak, DNS terbaik"
                 Tier.CYPHERSTAR -> "Cypherstar — Mixnet penuh, semua kombinasi bebas"
             }
-            textSize = 14f; setPadding(0, 8, 0, 24)
+            textSize = 14f; setPadding(0, 8, 0, 16)
         })
+        if (tier == Tier.GENKAI) {
+            root.addView(Button(this).apply {
+                text = "⬆ Upgrade ke Cyborg (Rp20rb) atau Cypherstar (Rp50rb)"
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, UpgradeActivity::class.java))
+                }
+            })
+        }
         installed = SelectedApps.listInstalled(this)
         val selected = SelectedApps.load(this).toMutableSet()
         val labels = installed.map { it.label }
@@ -44,26 +55,36 @@ class MainActivity : AppCompatActivity() {
                 val sel = mutableSetOf<String>()
                 for (i in 0 until appList.count) if (appList.isItemChecked(i)) sel.add(installed[i].packageName)
                 SelectedApps.save(this@MainActivity, sel)
-                val intent = VpnService.prepare(this@MainActivity)
-                if (intent != null) startActivityForResult(intent, REQUEST_VPN) else startVpn()
+                try {
+                    val intent = VpnService.prepare(this@MainActivity)
+                    if (intent != null) startActivityForResult(intent, REQUEST_VPN) else startVpn()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
         })
         root.addView(Button(this).apply {
             text = "Matikan VPN"
-            setOnClickListener { stopService(Intent(this@MainActivity, KeyVaultVpnService::class.java)) }
+            setOnClickListener {
+                stopService(Intent(this@MainActivity, KeyVaultVpnService::class.java))
+                Toast.makeText(this@MainActivity, "VPN dimatikan", Toast.LENGTH_SHORT).show()
+            }
         })
         root.addView(Button(this).apply {
             text = "Aktifkan Monitor Aplikasi"
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         })
-        root.addView(TextView(this).apply {
-            text = "Upgrade: Cyborg Rp20rb / Cypherstar Rp50rb\nBayar Bitcoin: 12EDhTKuQY5yarNA3SJHtL9NmRiAEMZwA3"
-            textSize = 12f; setPadding(0, 24, 0, 0)
-        })
         setContentView(root)
     }
 
-    private fun startVpn() = startForegroundService(Intent(this, KeyVaultVpnService::class.java))
+    private fun startVpn() {
+        try {
+            startForegroundService(Intent(this, KeyVaultVpnService::class.java))
+            Toast.makeText(this, "VPN aktif", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Gagal: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQUEST_VPN && resultCode == RESULT_OK) startVpn()
